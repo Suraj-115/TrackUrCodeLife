@@ -15,20 +15,12 @@ const test = async () => {
         });
 
         if (!student) {
-            console.log("No student with CodeChef username found.");
             return;
         }
 
-        console.log(
-            "Updating:",
-            student.codechefUsername
-        );
 
         const stats =
             await updateCodeChefStats(student);
-
-        console.log("Updated stats:");
-        console.log(stats);
 
     } catch (error) {
         console.error(

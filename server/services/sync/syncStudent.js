@@ -47,8 +47,7 @@ const markSyncFailed = async (studentId, prefix, message) => {
 };
 
 const syncStudent = async (student) => {
-    console.log(`\nSyncing student: ${student.name}`);
-
+  
     if (student.leetcodeUsername) {
         try {
             const data = await getLeetCodeData(student.leetcodeUsername);
@@ -59,7 +58,6 @@ const syncStudent = async (student) => {
                 { runValidators: true }
             );
 
-            console.log(`LeetCode stats updated for ${student.name}`);
         } catch (error) {
             console.error(
                 `LeetCode update failed for ${student.name}:`,
@@ -81,7 +79,6 @@ const syncStudent = async (student) => {
                 { runValidators: true }
             );
 
-            console.log(`CodeChef stats updated for ${student.name}`);
         } catch (error) {
             console.error(
                 `CodeChef update failed for ${student.name}:`,
@@ -92,8 +89,6 @@ const syncStudent = async (student) => {
     } else {
         console.log(`CodeChef skipped for ${student.name}: username missing`);
     }
-
-    console.log(`Finished syncing: ${student.name}`);
 };
 
 module.exports = syncStudent;

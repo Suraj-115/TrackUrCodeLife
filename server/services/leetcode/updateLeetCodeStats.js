@@ -23,10 +23,6 @@ const updateLeetCodeStats = async (student) => {
 
         await student.save();
 
-        console.log(
-            `LeetCode stats updated for ${student.leetcodeUsername}`
-        );
-
         return student.leetcodeStats;
 
     } catch (error) {

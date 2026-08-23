@@ -51,8 +51,6 @@ const start = async () => {
     startSyncScheduler();
 
     app.listen(PORT, () => {
-        console.log(`Server running on port ${PORT}`);
-
         if (process.env.SYNC_ON_START === "true") {
             setTimeout(() => {
                 syncAllStudents().catch((error) => {

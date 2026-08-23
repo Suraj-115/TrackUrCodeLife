@@ -6,9 +6,6 @@ const test = async () => {
         const data =
             await getCodeChefData("satyamkhandani");
 
-        console.log("CodeChef Data:");
-        console.log(data);
-
     } catch (error) {
         console.error(error.message);
     }

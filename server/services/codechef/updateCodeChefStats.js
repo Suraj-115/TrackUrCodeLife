@@ -25,10 +25,6 @@ const updateCodeChefStats = async (student) => {
 
         await student.save();
 
-        console.log(
-            `CodeChef stats updated for ${student.codechefUsername}`
-        );
-
         return student.codechefStats;
 
     } catch (error) {

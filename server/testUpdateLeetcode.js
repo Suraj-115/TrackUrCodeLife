@@ -14,16 +14,11 @@ const test = async () => {
         });
 
         if (!student) {
-            console.log("No student with LeetCode username found.");
             return;
         }
 
-        console.log("Updating:", student.leetcodeUsername);
-
         const stats = await updateLeetCodeStats(student);
 
-        console.log("Updated stats:");
-        console.log(stats);
 
     } catch (error) {
         console.error("Test failed:", error.message);

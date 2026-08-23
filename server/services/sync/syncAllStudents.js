@@ -11,21 +11,13 @@ const getSyncDelayMs = () => {
 
 const syncAllStudents = async () => {
     if (isSyncing) {
-        console.log("Synchronization already in progress, skipping");
         return { skipped: true };
     }
 
     isSyncing = true;
-
-    console.log("\n========================================");
-    console.log("Starting student synchronization");
-    console.log("========================================");
-
     try {
         const students = await Student.find({});
         const pauseMs = getSyncDelayMs();
-
-        console.log(`Students found: ${students.length}`);
 
         for (let index = 0; index < students.length; index += 1) {
             const student = students[index];
@@ -43,10 +35,6 @@ const syncAllStudents = async () => {
                 await delay(pauseMs);
             }
         }
-
-        console.log("\n========================================");
-        console.log("Student synchronization completed");
-        console.log("========================================");
 
         return { skipped: false, count: students.length };
     } catch (error) {

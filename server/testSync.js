@@ -49,14 +49,6 @@ const getSafeNumber = (value, defaultValue = 0) => {
 // ============================================
 
 const syncStudent = async (student) => {
-
-    console.log(
-        "\n----------------------------------------"
-    );
-
-    console.log(`Syncing: ${student.name}`);
-
-
     // ========================================
     // LEETCODE
     // ========================================
@@ -124,10 +116,6 @@ const syncStudent = async (student) => {
                 }
             );
 
-
-            console.log(
-                `LeetCode stats updated for ${student.name}`
-            );
 
         } catch (error) {
 
@@ -231,11 +219,6 @@ const syncStudent = async (student) => {
             `CodeChef skipped for ${student.name}: username missing`
         );
     }
-
-
-    console.log(
-        `Finished: ${student.name}`
-    );
 };
 
 
@@ -251,12 +234,6 @@ const syncAllStudents = async () => {
 
 
         const students = await Student.find({});
-
-
-        console.log(
-            `Starting sync for ${students.length} students`
-        );
-
 
         // ------------------------------------
         // Process students one by one
@@ -279,21 +256,6 @@ const syncAllStudents = async () => {
                 continue;
             }
         }
-
-
-        console.log(
-            "\n========================================"
-        );
-
-        console.log(
-            "Student synchronization completed"
-        );
-
-        console.log(
-            "========================================"
-        );
-
-
         process.exit(0);
 
     } catch (error) {

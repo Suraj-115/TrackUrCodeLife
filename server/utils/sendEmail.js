@@ -1,22 +1,38 @@
-const nodemailer = require("nodemailer");
+const { BrevoClient } = require("@getbrevo/brevo");
 
-const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    }
+const brevo = new BrevoClient({
+    apiKey: process.env.BREVO_API_KEY
 });
 
 const sendEmail = async (to, subject, text) => {
-    await transporter.sendMail({
-        from: process.env.EMAIL_USER,
-        to: to,
-        subject: subject,
-        text: text
-    });
+    try {
+        const result = await brevo.transactionalEmails.sendTransacEmail({
+            sender: {
+                name: "TrackUrCodeLife",
+                email: process.env.EMAIL_USER
+            },
+
+            to: [
+                {
+                    email: to
+                }
+            ],
+
+            subject: subject,
+
+            textContent: text
+        });
+
+        return result;
+
+    } catch (error) {
+        console.error(
+            "Brevo email error:",
+            error.body || error.message
+        );
+
+        throw error;
+    }
 };
 
 module.exports = sendEmail;
