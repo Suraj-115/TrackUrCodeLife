@@ -11,7 +11,9 @@ function AdminDashboard() {
     const [section, setSection] = useState("");
     const [loading, setLoading] = useState(true);
     const [message, setMessage] = useState("");
+    const [messageType, setMessageType] = useState("error");
     const [editingStudent, setEditingStudent] = useState(null);
+    const [syncing, setSyncing] = useState(false);
 
     const authHeaders = useCallback(() => {
         const token = localStorage.getItem("adminToken");
@@ -53,6 +55,7 @@ function AdminDashboard() {
                 return;
             }
 
+            setMessageType("error");
             setMessage(error.response?.data?.message || "Failed to fetch students.");
         } finally {
             setLoading(false);
@@ -94,6 +97,7 @@ function AdminDashboard() {
             await api.delete(`/students/admin/students/${id}`, { headers });
             await fetchStudents();
         } catch (error) {
+            setMessageType("error");
             setMessage(error.response?.data?.message || "Failed to delete student.");
         }
     };
@@ -121,9 +125,38 @@ function AdminDashboard() {
             );
 
             setEditingStudent(null);
+            setMessageType("success");
+            setMessage("Student updated. Stats will refresh shortly.");
             await fetchStudents();
         } catch (error) {
+            setMessageType("error");
             setMessage(error.response?.data?.message || "Failed to update student.");
+        }
+    };
+
+    const startSync = async () => {
+        const headers = authHeaders();
+
+        if (!headers) {
+            logout();
+            return;
+        }
+
+        try {
+            setSyncing(true);
+            await api.post("/students/admin/sync", {}, { headers });
+            setMessageType("success");
+            setMessage("Synchronization started. Platform stats will update in the background.");
+        } catch (error) {
+            if (error.response?.status === 401 || error.response?.status === 403) {
+                logout();
+                return;
+            }
+
+            setMessageType("error");
+            setMessage(error.response?.data?.message || "Failed to start synchronization.");
+        } finally {
+            setSyncing(false);
         }
     };
 
@@ -137,9 +170,14 @@ function AdminDashboard() {
                         <small>Student data management</small>
                     </span>
                 </button>
-                <button className="dark-button" onClick={logout} type="button">
-                    Logout
-                </button>
+                <div className="table-actions">
+                    <button className="ghost-button" onClick={startSync} type="button" disabled={syncing}>
+                        {syncing ? "Starting..." : "Sync Stats"}
+                    </button>
+                    <button className="dark-button" onClick={logout} type="button">
+                        Logout
+                    </button>
+                </div>
             </header>
 
             <section className="page-header">
@@ -179,7 +217,11 @@ function AdminDashboard() {
                     </label>
                 </div>
 
-                {message && <p className="status-message error">{message}</p>}
+                {message && (
+                    <p className={`status-message ${messageType === "success" ? "success" : "error"}`}>
+                        {message}
+                    </p>
+                )}
 
                 {loading && (
                     <div className="state-card">

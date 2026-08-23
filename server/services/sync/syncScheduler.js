@@ -1,42 +1,29 @@
 const cron = require("node-cron");
-
-const syncAllStudents =
-    require("./syncAllStudents");
-
+const syncAllStudents = require("./syncAllStudents");
 
 const startSyncScheduler = () => {
+    const schedule = process.env.SYNC_CRON || "0 */6 * * *";
 
-    console.log(
-        "Sync scheduler started"
-    );
-
-
-    // ==========================================
-    // RUN EVERY 6 HOURS
-    // ==========================================
+    console.log(`Sync scheduler started (${schedule})`);
 
     cron.schedule(
-        "0 */6 * * *",
+        schedule,
         async () => {
-
-            console.log(
-                "\n6-hour synchronization triggered"
-            );
+            console.log("\nScheduled synchronization triggered");
 
             try {
-
                 await syncAllStudents();
-
             } catch (error) {
-
                 console.error(
                     "Scheduled synchronization failed:",
                     error.message
                 );
             }
+        },
+        {
+            timezone: process.env.SYNC_TIMEZONE || "Asia/Kolkata"
         }
     );
 };
-
 
 module.exports = startSyncScheduler;

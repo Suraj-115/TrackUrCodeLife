@@ -21,6 +21,7 @@ function Signup() {
     const [verified, setVerified] = useState(false);
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState("");
+    const [messageType, setMessageType] = useState("");
 
     const handleChange = (e) => {
         setFormData({
@@ -33,14 +34,17 @@ function Signup() {
         try {
             setLoading(true);
             setMessage("");
+            setMessageType("");
 
             await api.post("/students/send-otp", {
                 collegeEmail: formData.collegeEmail
             });
 
             setOtpSent(true);
+            setMessageType("success");
             setMessage("OTP sent to your college email.");
         } catch (error) {
+            setMessageType("error");
             setMessage(error.response?.data?.message || "Failed to send OTP");
         } finally {
             setLoading(false);
@@ -51,6 +55,7 @@ function Signup() {
         try {
             setLoading(true);
             setMessage("");
+            setMessageType("");
 
             await api.post("/students/verify-otp", {
                 collegeEmail: formData.collegeEmail,
@@ -58,8 +63,10 @@ function Signup() {
             });
 
             setVerified(true);
+            setMessageType("success");
             setMessage("Email verified successfully.");
         } catch (error) {
+            setMessageType("error");
             setMessage(error.response?.data?.message || "Invalid OTP");
         } finally {
             setLoading(false);
@@ -70,6 +77,7 @@ function Signup() {
         e.preventDefault();
 
         if (!verified) {
+            setMessageType("error");
             setMessage("Please verify your college email first.");
             return;
         }
@@ -77,15 +85,18 @@ function Signup() {
         try {
             setLoading(true);
             setMessage("");
+            setMessageType("");
 
             await api.post("/students/register", formData);
 
+            setMessageType("success");
             setMessage("Registration successful. Redirecting to login...");
 
             setTimeout(() => {
                 navigate("/");
             }, 900);
         } catch (error) {
+            setMessageType("error");
             setMessage(error.response?.data?.message || "Registration failed");
         } finally {
             setLoading(false);
@@ -253,7 +264,7 @@ function Signup() {
                     </form>
 
                     {message && (
-                        <p className={`status-message ${verified ? "success" : "error"}`}>
+                        <p className={`status-message ${messageType === "success" ? "success" : "error"}`}>
                             {message}
                         </p>
                     )}

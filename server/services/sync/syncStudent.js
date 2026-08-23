@@ -1,11 +1,6 @@
 const Student = require("../../models/Student");
-
-const getLeetCodeData =
-    require("../leetcode/leetcodeService");
-
-const getCodeChefData =
-    require("../codechef/codechefService");
-
+const getLeetCodeData = require("../leetcode/leetcodeService");
+const getCodeChefData = require("../codechef/codechefService");
 
 const getSafeNumber = (value, defaultValue = 0) => {
     const number = Number(value);
@@ -14,7 +9,6 @@ const getSafeNumber = (value, defaultValue = 0) => {
         ? number
         : defaultValue;
 };
-
 
 const getValidDate = (value) => {
     if (!value) {
@@ -30,192 +24,76 @@ const getValidDate = (value) => {
     return date;
 };
 
+const buildStatsUpdate = (prefix, data) => ({
+    [`${prefix}.problemsSolved`]: getSafeNumber(data.problemsSolved),
+    [`${prefix}.contestRating`]: Math.round(getSafeNumber(data.contestRating)),
+    [`${prefix}.contestsParticipated`]: getSafeNumber(data.contestsParticipated),
+    [`${prefix}.lastParticipatedContestDate`]: getValidDate(
+        data.lastParticipatedContestDate
+    ),
+    [`${prefix}.lastUpdated`]: new Date(),
+    [`${prefix}.syncStatus`]: "SUCCESS",
+    [`${prefix}.syncError`]: null
+});
+
+const markSyncFailed = async (studentId, prefix, message) => {
+    await Student.findByIdAndUpdate(studentId, {
+        $set: {
+            [`${prefix}.syncStatus`]: "FAILED",
+            [`${prefix}.syncError`]: message,
+            [`${prefix}.lastUpdated`]: new Date()
+        }
+    });
+};
 
 const syncStudent = async (student) => {
-
-    console.log(
-        `\nSyncing student: ${student.name}`
-    );
-
-
-    // ==========================================
-    // LEETCODE
-    // ==========================================
+    console.log(`\nSyncing student: ${student.name}`);
 
     if (student.leetcodeUsername) {
-
         try {
-
-            const data =
-                await getLeetCodeData(
-                    student.leetcodeUsername
-                );
-
-
-            const problemsSolved =
-                getSafeNumber(
-                    data.problemsSolved
-                );
-
-
-            const contestRating =
-                Math.round(
-                    getSafeNumber(
-                        data.contestRating
-                    )
-                );
-
-
-            const contestsParticipated =
-                getSafeNumber(
-                    data.contestsParticipated
-                );
-
-
-            const lastParticipatedContestDate =
-                getValidDate(
-                    data.lastParticipatedContestDate
-                );
-
+            const data = await getLeetCodeData(student.leetcodeUsername);
 
             await Student.findByIdAndUpdate(
                 student._id,
-                {
-                    $set: {
-                        "leetcodeStats.problemsSolved":
-                            problemsSolved,
-
-                        "leetcodeStats.contestRating":
-                            contestRating,
-
-                        "leetcodeStats.contestsParticipated":
-                            contestsParticipated,
-
-                        "leetcodeStats.lastParticipatedContestDate":
-                            lastParticipatedContestDate,
-
-                        "leetcodeStats.lastUpdated":
-                            new Date()
-                    }
-                },
-                {
-                    returnDocument: "after",
-                    runValidators: true
-                }
+                { $set: buildStatsUpdate("leetcodeStats", data) },
+                { runValidators: true }
             );
 
-
-            console.log(
-                `LeetCode stats updated for ${student.name}`
-            );
-
+            console.log(`LeetCode stats updated for ${student.name}`);
         } catch (error) {
-
             console.error(
                 `LeetCode update failed for ${student.name}:`,
                 error.message
             );
+            await markSyncFailed(student._id, "leetcodeStats", error.message);
         }
-
     } else {
-
-        console.log(
-            `LeetCode skipped for ${student.name}: username missing`
-        );
+        console.log(`LeetCode skipped for ${student.name}: username missing`);
     }
 
-
-    // ==========================================
-    // CODECHEF
-    // ==========================================
-
     if (student.codechefUsername) {
-
         try {
-
-            const data =
-                await getCodeChefData(
-                    student.codechefUsername
-                );
-
-
-            const problemsSolved =
-                getSafeNumber(
-                    data.problemsSolved
-                );
-
-
-            const contestRating =
-                Math.round(
-                    getSafeNumber(
-                        data.contestRating
-                    )
-                );
-
-
-            const contestsParticipated =
-                getSafeNumber(
-                    data.contestsParticipated
-                );
-
-
-            const lastParticipatedContestDate =
-                getValidDate(
-                    data.lastParticipatedContestDate
-                );
-
+            const data = await getCodeChefData(student.codechefUsername);
 
             await Student.findByIdAndUpdate(
                 student._id,
-                {
-                    $set: {
-                        "codechefStats.problemsSolved":
-                            problemsSolved,
-
-                        "codechefStats.contestRating":
-                            contestRating,
-
-                        "codechefStats.contestsParticipated":
-                            contestsParticipated,
-
-                        "codechefStats.lastParticipatedContestDate":
-                            lastParticipatedContestDate,
-
-                        "codechefStats.lastUpdated":
-                            new Date()
-                    }
-                },
-                {
-                    returnDocument: "after",
-                    runValidators: true
-                }
+                { $set: buildStatsUpdate("codechefStats", data) },
+                { runValidators: true }
             );
 
-
-            console.log(
-                `CodeChef stats updated for ${student.name}`
-            );
-
+            console.log(`CodeChef stats updated for ${student.name}`);
         } catch (error) {
-
             console.error(
                 `CodeChef update failed for ${student.name}:`,
                 error.message
             );
+            await markSyncFailed(student._id, "codechefStats", error.message);
         }
-
     } else {
-
-        console.log(
-            `CodeChef skipped for ${student.name}: username missing`
-        );
+        console.log(`CodeChef skipped for ${student.name}: username missing`);
     }
 
-
-    console.log(
-        `Finished syncing: ${student.name}`
-    );
+    console.log(`Finished syncing: ${student.name}`);
 };
-
 
 module.exports = syncStudent;

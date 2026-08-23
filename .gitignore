@@ -1,6 +1,8 @@
 .env
 .env.*
 !.env.example
+!server/.env.example
+!client/.env.example
 node_modules/
 client/node_modules/
 server/node_modules/

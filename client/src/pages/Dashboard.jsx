@@ -88,7 +88,7 @@ function Dashboard() {
                 headers
             });
 
-            setStudents(response.data.students || response.data.leaderboard || []);
+            setStudents(response.data.leaderboard || []);
         } catch (err) {
             if (handleAuthError(err)) {
                 return;

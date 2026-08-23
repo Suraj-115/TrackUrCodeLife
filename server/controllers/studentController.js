@@ -4,6 +4,22 @@ const jwt = require("jsonwebtoken");
 const Student = require("../models/Student");
 const OTP = require("../models/OTP");
 const sendEmail = require("../utils/sendEmail");
+const syncStudent = require("../services/sync/syncStudent");
+const syncAllStudents = require("../services/sync/syncAllStudents");
+
+const toPublicStudent = (student) => {
+    const data = student.toObject ? student.toObject() : { ...student };
+    delete data.password;
+    return data;
+};
+
+const queueStudentSync = (student) => {
+    setImmediate(() => {
+        syncStudent(student).catch((error) => {
+            console.error(`Background sync failed for ${student.name}:`, error.message);
+        });
+    });
+};
 
 const registerStudent = async (req, res) => {
     try {
@@ -45,6 +61,13 @@ const registerStudent = async (req, res) => {
             });
         }
 
+        if (!password || password.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: "Password must be at least 6 characters"
+            });
+        }
+
         const hashedPassword = await bcrypt.hash(password, 10);
 
         const student = await Student.create({
@@ -57,12 +80,14 @@ const registerStudent = async (req, res) => {
             codechefUsername
         });
 
+        await OTP.deleteOne({ _id: verifiedOTP._id });
+        queueStudentSync(student);
+
         res.status(201).json({
             success: true,
             message: "Student registered successfully",
-            student
+            student: toPublicStudent(student)
         });
-        await OTP.deleteOne({ _id: verifiedOTP._id });
 
     } catch (error) {
         res.status(500).json({
@@ -157,6 +182,15 @@ const sendOTP = async (req, res) => {
             });
         }
 
+        const existingStudent = await Student.findOne({ collegeEmail: email });
+
+        if (existingStudent) {
+            return res.status(409).json({
+                success: false,
+                message: "Student with this email already exists"
+            });
+        }
+
         // Generate 6-digit OTP
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -221,6 +255,7 @@ const verifyOTP = async (req, res) => {
         }
 
         otpRecord.verified = true;
+        otpRecord.expiresAt = new Date(Date.now() + 30 * 60 * 1000);
         await otpRecord.save();
 
         res.status(200).json({
@@ -313,21 +348,19 @@ const getLeaderboard = async (req, res) => {
             .sort(sort);
 
         const leaderboard = students.map((student, index) => {
-            const stats =
-                student[`${platform}Stats`];
+            const stats = student[`${platform}Stats`] || {};
 
             return {
                 rank: index + 1,
                 name: student.name,
                 rollNo: student.rollNo,
                 section: student.section,
-                problemsSolved: stats.problemsSolved,
-                contestRating: stats.contestRating,
-                contestsParticipated:
-                    stats.contestsParticipated,
-                lastParticipatedContestDate:
-                    stats.lastParticipatedContestDate,
-                lastUpdated: stats.lastUpdated
+                problemsSolved: stats.problemsSolved ?? 0,
+                contestRating: stats.contestRating ?? 0,
+                contestsParticipated: stats.contestsParticipated ?? 0,
+                lastParticipatedContestDate: stats.lastParticipatedContestDate,
+                lastUpdated: stats.lastUpdated,
+                syncStatus: stats.syncStatus || "PENDING"
             };
         });
 
@@ -335,7 +368,6 @@ const getLeaderboard = async (req, res) => {
             success: true,
             platform,
             metric,
-            students,
             leaderboard
         });
 
@@ -352,6 +384,13 @@ const getLeaderboard = async (req, res) => {
 const loginAdmin = async (req, res) => {
     try {
         const { email, password } = req.body;
+
+        if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) {
+            return res.status(500).json({
+                success: false,
+                message: "Admin is not configured"
+            });
+        }
 
         if (
             email !== process.env.ADMIN_EMAIL ||
@@ -445,11 +484,12 @@ const updateStudent = async (req, res) => {
         }
 
         await student.save();
+        queueStudentSync(student);
 
         res.status(200).json({
             success: true,
             message: "Profile updated successfully",
-            student
+            student: toPublicStudent(student)
         });
 
     } catch (error) {
@@ -500,11 +540,12 @@ const updateStudentByAdmin = async (req, res) => {
         }
 
         await student.save();
+        queueStudentSync(student);
 
         res.status(200).json({
             success: true,
             message: "Student updated successfully",
-            student
+            student: toPublicStudent(student)
         });
 
     } catch (error) {
@@ -546,6 +587,35 @@ const deleteStudentByAdmin = async (req, res) => {
     }
 };
 
+const syncAllStudentsAdmin = async (req, res) => {
+    try {
+        if (syncAllStudents.isSyncing()) {
+            return res.status(202).json({
+                success: true,
+                message: "Synchronization is already running"
+            });
+        }
+
+        setImmediate(() => {
+            syncAllStudents().catch((error) => {
+                console.error("Admin synchronization failed:", error.message);
+            });
+        });
+
+        res.status(202).json({
+            success: true,
+            message: "Synchronization started"
+        });
+    } catch (error) {
+        console.error(error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to start synchronization"
+        });
+    }
+};
+
 module.exports = {
     registerStudent,
     sendOTP,
@@ -557,6 +627,7 @@ module.exports = {
     getAllStudents,
     updateStudent,
     updateStudentByAdmin,
-    deleteStudentByAdmin
+    deleteStudentByAdmin,
+    syncAllStudentsAdmin
 };
 

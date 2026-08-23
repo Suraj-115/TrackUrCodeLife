@@ -38,9 +38,11 @@ const getLeetCodeData = async (username) => {
             {
                 headers: {
                     "Content-Type": "application/json",
-                    "Referer": "https://leetcode.com/",
+                    Origin: "https://leetcode.com",
+                    Referer: "https://leetcode.com/",
                     "User-Agent": "Mozilla/5.0"
-                }
+                },
+                timeout: 20000
             }
         );
 

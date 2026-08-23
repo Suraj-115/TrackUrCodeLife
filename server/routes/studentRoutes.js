@@ -11,7 +11,8 @@ const {
     getAllStudents,
     updateStudent,
     updateStudentByAdmin,
-    deleteStudentByAdmin
+    deleteStudentByAdmin,
+    syncAllStudentsAdmin
 } = require("../controllers/studentController");
 
 const protect = require("../middleware/authMiddleware");
@@ -72,6 +73,13 @@ router.delete(
     protect,
     adminOnly,
     deleteStudentByAdmin
+);
+
+router.post(
+    "/admin/sync",
+    protect,
+    adminOnly,
+    syncAllStudentsAdmin
 );
 
 module.exports = router;

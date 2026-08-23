@@ -14,6 +14,7 @@ function EditProfile() {
         codechefUsername: ""
     });
     const [message, setMessage] = useState("");
+    const [isError, setIsError] = useState(false);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
@@ -78,13 +79,15 @@ function EditProfile() {
         try {
             setSaving(true);
             setMessage("");
+            setIsError(false);
 
             await api.put("/students/profile", form, {
                 headers: authHeaders
             });
 
-            setMessage("Profile updated successfully.");
+            setMessage("Profile updated successfully. Platform stats will refresh shortly.");
         } catch (error) {
+            setIsError(true);
             setMessage(error.response?.data?.message || "Update failed");
         } finally {
             setSaving(false);
@@ -174,7 +177,11 @@ function EditProfile() {
                     </button>
                 </form>
 
-                {message && <p className="status-message success">{message}</p>}
+                {message && (
+                    <p className={`status-message ${isError ? "error" : "success"}`}>
+                        {message}
+                    </p>
+                )}
             </section>
         </main>
     );
