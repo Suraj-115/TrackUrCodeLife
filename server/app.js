@@ -13,7 +13,10 @@ if (missingEnv.length) {
 }
 
 const connectDB = require("./config/db");
+const authRoutes = require("./routes/authRoutes");
 const studentRoutes = require("./routes/studentRoutes");
+const adminRoutes = require("./routes/adminRoutes");
+const legacyRoutes = require("./routes/legacyRoutes");
 const startSyncScheduler = require("./services/sync/syncScheduler");
 const syncAllStudents = require("./services/sync/syncAllStudents");
 
@@ -31,7 +34,16 @@ app.use(cors({
 }));
 app.use(express.json());
 
+/*
+ * The compatibility router is mounted first: it shares the "/api/students"
+ * prefix with the student router, and its static paths ("/dashboard", "/me",
+ * "/leaderboard") would otherwise be swallowed by "/:id".
+ */
+app.use("/api/students", legacyRoutes);
+
+app.use("/api/auth", authRoutes);
 app.use("/api/students", studentRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.get("/", (req, res) => {
     res.send("TrackUrCodeLife API Running");

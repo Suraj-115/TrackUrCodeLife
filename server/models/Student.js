@@ -1,20 +1,25 @@
 const mongoose = require("mongoose");
 
+const SECTIONS = ["CSE-11", "CSE-14", "CSE-18", "CSE-22"];
+
 const platformStatsSchema = new mongoose.Schema(
     {
         problemsSolved: {
             type: Number,
-            default: 0
+            default: 0,
+            min: 0
         },
 
         contestRating: {
             type: Number,
-            default: 0
+            default: 0,
+            min: 0
         },
 
         contestsParticipated: {
             type: Number,
-            default: 0
+            default: 0,
+            min: 0
         },
 
         lastParticipatedContestDate: {
@@ -35,6 +40,15 @@ const platformStatsSchema = new mongoose.Schema(
 
         syncError: {
             type: String,
+            default: null
+        },
+
+        /*
+         * When contest history was last written for this platform. Lets the
+         * admin dashboard show whether analytics data is actually flowing.
+         */
+        contestHistorySyncedAt: {
+            type: Date,
             default: null
         }
     },
@@ -58,6 +72,7 @@ const studentSchema = new mongoose.Schema(
             lowercase: true,
             trim: true
         },
+
         password: {
             type: String,
             required: true
@@ -73,7 +88,7 @@ const studentSchema = new mongoose.Schema(
         section: {
             type: String,
             required: true,
-            enum: ["CSE-11", "CSE-14", "CSE-18", "CSE-22"]
+            enum: SECTIONS
         },
 
         leetcodeUsername: {
@@ -103,4 +118,10 @@ const studentSchema = new mongoose.Schema(
     }
 );
 
+studentSchema.index({ name: 1 });
+studentSchema.index({ section: 1 });
+
+studentSchema.statics.SECTIONS = SECTIONS;
+
 module.exports = mongoose.model("Student", studentSchema);
+module.exports.SECTIONS = SECTIONS;

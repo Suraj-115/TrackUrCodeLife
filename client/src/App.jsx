@@ -3,7 +3,6 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Dashboard from "./pages/Dashboard";
 import Developer from "./pages/Developer";
-import AdminLogin from "./pages/AdminLogin";
 import AdminDashboard from "./pages/AdminDashboard";
 import EditProfile from "./pages/EditProfile";
 
@@ -18,7 +17,6 @@ function App() {
                 <Route path="/edit-profile" element={<EditProfile />} />
                 <Route path="/profile" element={<EditProfile />} />
                 <Route path="/developer" element={<Developer />} />
-                <Route path="/admin-login" element={<AdminLogin />} />
                 <Route path="/admin" element={<AdminDashboard />} />
                 <Route path="*" element={<Login />} />
             </Routes>

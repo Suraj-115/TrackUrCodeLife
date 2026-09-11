@@ -1,633 +1,334 @@
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-
 const Student = require("../models/Student");
-const OTP = require("../models/OTP");
-const sendEmail = require("../utils/sendEmail");
 const syncStudent = require("../services/sync/syncStudent");
-const syncAllStudents = require("../services/sync/syncAllStudents");
+const { SECTIONS } = require("../models/Student");
 
-const toPublicStudent = (student) => {
-    const data = student.toObject ? student.toObject() : { ...student };
-    delete data.password;
-    return data;
+const {
+    validateUsername,
+    FAILED,
+    OK
+} = require("../utils/validation");
+
+const PLATFORM_SYNC_ERRORS = {
+    leetcode: "Invalid LeetCode ID or the profile could not be reached.",
+    codechef: "Invalid CodeChef ID or the profile could not be reached."
 };
 
-const queueStudentSync = (student) => {
-    setImmediate(() => {
-        syncStudent(student).catch((error) => {
-            console.error(`Background sync failed for ${student.name}:`, error.message);
-        });
-    });
+/**
+ * Escapes a user-supplied string before it is used in a RegExp, so a search
+ * for "a+b" is treated as literal text rather than a pattern.
+ */
+const escapeRegex = (value) =>
+    String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const PUBLIC_FIELDS =
+    "_id name rollNo section leetcodeUsername codechefUsername " +
+    "leetcodeStats codechefStats createdAt";
+
+/**
+ * Normalises one student document into the shape the dashboard and admin
+ * tables consume, with both platforms side by side.
+ */
+const toLeaderboardRow = (student) => {
+    const leetcode = student.leetcodeStats || {};
+    const codechef = student.codechefStats || {};
+
+    const lcProblems = leetcode.problemsSolved ?? 0;
+    const ccProblems = codechef.problemsSolved ?? 0;
+    const lcRating = leetcode.contestRating ?? 0;
+    const ccRating = codechef.contestRating ?? 0;
+
+    return {
+        _id: student._id,
+        name: student.name,
+        rollNo: student.rollNo,
+        section: student.section,
+        leetcodeUsername: student.leetcodeUsername || "",
+        codechefUsername: student.codechefUsername || "",
+
+        leetcode: {
+            problemsSolved: lcProblems,
+            contestRating: lcRating,
+            contestsParticipated: leetcode.contestsParticipated ?? 0,
+            lastParticipatedContestDate:
+                leetcode.lastParticipatedContestDate || null,
+            lastUpdated: leetcode.lastUpdated || null,
+            syncStatus: leetcode.syncStatus || "PENDING",
+            syncError: leetcode.syncError || null
+        },
+
+        codechef: {
+            problemsSolved: ccProblems,
+            contestRating: ccRating,
+            contestsParticipated: codechef.contestsParticipated ?? 0,
+            lastParticipatedContestDate:
+                codechef.lastParticipatedContestDate || null,
+            lastUpdated: codechef.lastUpdated || null,
+            syncStatus: codechef.syncStatus || "PENDING",
+            syncError: codechef.syncError || null
+        },
+
+        totalProblems: lcProblems + ccProblems,
+        totalRating: lcRating + ccRating,
+
+        lastUpdated:
+            [leetcode.lastUpdated, codechef.lastUpdated]
+                .filter(Boolean)
+                .sort()
+                .pop() || null
+    };
 };
 
-const registerStudent = async (req, res) => {
+const SORT_FIELDS = {
+    totalProblems: (row) => row.totalProblems,
+    totalRating: (row) => row.totalRating,
+    leetcodeProblems: (row) => row.leetcode.problemsSolved,
+    codechefProblems: (row) => row.codechef.problemsSolved,
+    leetcodeRating: (row) => row.leetcode.contestRating,
+    codechefRating: (row) => row.codechef.contestRating,
+    name: (row) => row.name
+};
+
+/**
+ * The shared student directory that powers both dashboards.
+ *
+ * Supports the two filters the product asks for — name search and one of the
+ * four CSE sections — and ranks by a chosen metric.
+ */
+const getStudents = async (req, res) => {
     try {
-        const {
-            name,
-            collegeEmail,
-            password,
-            rollNo,
-            section,
-            leetcodeUsername,
-            codechefUsername
-        } = req.body;
-
-        const email = collegeEmail.toLowerCase().trim();
-
-        const verifiedOTP = await OTP.findOne({
-            email,
-            verified: true
-        });
-
-        if (!verifiedOTP) {
-            return res.status(400).json({
-                success: false,
-                message: "Please verify your college email first"
-            });
-        }
-
-        const existingStudent = await Student.findOne({
-            $or: [
-                { collegeEmail: email },
-                { rollNo }
-            ]
-        });
-
-        if (existingStudent) {
-            return res.status(409).json({
-                success: false,
-                message: "Student with this email or roll number already exists"
-            });
-        }
-
-        if (!password || password.length < 6) {
-            return res.status(400).json({
-                success: false,
-                message: "Password must be at least 6 characters"
-            });
-        }
-
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        const student = await Student.create({
-            name,
-            collegeEmail: email,
-            password: hashedPassword,
-            rollNo,
-            section,
-            leetcodeUsername,
-            codechefUsername
-        });
-
-        await OTP.deleteOne({ _id: verifiedOTP._id });
-        queueStudentSync(student);
-
-        res.status(201).json({
-            success: true,
-            message: "Student registered successfully",
-            student: toPublicStudent(student)
-        });
-
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-};
-
-
-const loginStudent = async (req, res) => {
-    try {
-        const { collegeEmail, password } = req.body;
-
-        if (!collegeEmail || !password) {
-            return res.status(400).json({
-                success: false,
-                message: "Email and password are required"
-            });
-        }
-
-        const email = collegeEmail.toLowerCase().trim();
-
-        const student = await Student.findOne({
-            collegeEmail: email
-        });
-
-        if (!student) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid email or password"
-            });
-        }
-
-        const passwordMatch = await bcrypt.compare(
-            password,
-            student.password
-        );
-
-        if (!passwordMatch) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid email or password"
-            });
-        }
-
-        const token = jwt.sign(
-            {
-                studentId: student._id,
-                role: "student"
-            },
-            process.env.JWT_SECRET,
-            {
-                expiresIn: "1d"
-            }
-        );
-
-        res.status(200).json({
-            success: true,
-            message: "Login successful",
-            token
-        });
-
-    } catch (error) {
-        console.error(error);
-
-        res.status(500).json({
-            success: false,
-            message: "Login failed"
-        });
-    }
-};
-
-const sendOTP = async (req, res) => {
-    try {
-        const { collegeEmail } = req.body;
-
-        if (!collegeEmail) {
-            return res.status(400).json({
-                success: false,
-                message: "College email is required"
-            });
-        }
-
-        const email = collegeEmail.toLowerCase().trim();
-
-        // Only ABES college emails allowed
-        if (!email.endsWith("@abes.ac.in")) {
-            return res.status(400).json({
-                success: false,
-                message: "Only ABES college email is allowed"
-            });
-        }
-
-        const existingStudent = await Student.findOne({ collegeEmail: email });
-
-        if (existingStudent) {
-            return res.status(409).json({
-                success: false,
-                message: "Student with this email already exists"
-            });
-        }
-
-        // Generate 6-digit OTP
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-        // OTP expires in 5 minutes
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-        // Remove previous OTP
-        await OTP.deleteMany({ email });
-
-        // Store new OTP
-        await OTP.create({
-            email,
-            otp,
-            expiresAt
-        });
-
-        // Send OTP
-        await sendEmail(
-            email,
-            "TrackUrCodeLife - Email Verification",
-            `Your OTP is ${otp}. It is valid for 5 minutes.`
-        );
-
-        res.status(200).json({
-            success: true,
-            message: "OTP sent successfully"
-        });
-
-    } catch (error) {
-        console.error(error);
-
-        res.status(500).json({
-            success: false,
-            message: "Failed to send OTP"
-        });
-    }
-};
-
-const verifyOTP = async (req, res) => {
-    try {
-        const { collegeEmail, otp } = req.body;
-
-        if (!collegeEmail || !otp) {
-            return res.status(400).json({
-                success: false,
-                message: "College email and OTP are required"
-            });
-        }
-
-        const email = collegeEmail.toLowerCase().trim();
-
-        const otpRecord = await OTP.findOne({
-            email,
-            otp
-        });
-
-        if (!otpRecord || otpRecord.expiresAt < new Date()) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid or expired OTP"
-            });
-        }
-
-        otpRecord.verified = true;
-        otpRecord.expiresAt = new Date(Date.now() + 30 * 60 * 1000);
-        await otpRecord.save();
-
-        res.status(200).json({
-            success: true,
-            message: "Email verified successfully"
-        });
-
-    } catch (error) {
-        console.error(error);
-
-        res.status(500).json({
-            success: false,
-            message: "OTP verification failed"
-        });
-    }
-};
-
-const getDashboard = async (req, res) => {
-    try {
-        const student = await Student.findById(
-            req.studentId
-        ).select("-password -otp -otpExpiresAt");
-
-        if (!student) {
-            return res.status(404).json({
-                success: false,
-                message: "Student not found"
-            });
-        }
-
-        res.status(200).json({
-            success: true,
-            student
-        });
-
-    } catch (error) {
-        console.error(error);
-
-        res.status(500).json({
-            success: false,
-            message: "Failed to load dashboard"
-        });
-    }
-};
-
-const getLeaderboard = async (req, res) => {
-    try {
-        const {
-            platform = "leetcode",
-            metric = "contestRating",
-            section
-        } = req.query;
-
-        if (!["leetcode", "codechef"].includes(platform)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid platform"
-            });
-        }
-
-        const allowedMetrics = [
-            "problemsSolved",
-            "contestRating",
-            "contestsParticipated",
-            "lastParticipatedContestDate"
-        ];
-
-        if (!allowedMetrics.includes(metric)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid metric"
-            });
-        }
+        const { search, section, sort = "totalProblems", order = "desc" } =
+            req.query;
 
         const query = {};
 
-        if (section) {
+        if (section && section !== "All") {
+            if (!SECTIONS.includes(section)) {
+                return FAILED(res, 400, "Invalid section filter");
+            }
+
             query.section = section;
         }
 
-        const field = `${platform}Stats.${metric}`;
-
-        const sort = { [field]: -1 };
-
-        const students = await Student.find(query)
-            .select(
-                "_id name rollNo section " +
-                "leetcodeStats codechefStats"
-            )
-            .sort(sort);
-
-        const leaderboard = students.map((student, index) => {
-            const stats = student[`${platform}Stats`] || {};
-
-            return {
-                rank: index + 1,
-                name: student.name,
-                rollNo: student.rollNo,
-                section: student.section,
-                problemsSolved: stats.problemsSolved ?? 0,
-                contestRating: stats.contestRating ?? 0,
-                contestsParticipated: stats.contestsParticipated ?? 0,
-                lastParticipatedContestDate: stats.lastParticipatedContestDate,
-                lastUpdated: stats.lastUpdated,
-                syncStatus: stats.syncStatus || "PENDING"
+        if (search && String(search).trim()) {
+            query.name = {
+                $regex: escapeRegex(String(search).trim()),
+                $options: "i"
             };
+        }
+
+        const students = await Student.find(query).select(PUBLIC_FIELDS);
+
+        const rows = students.map(toLeaderboardRow);
+
+        const sortKey = SORT_FIELDS[sort] ? sort : "totalProblems";
+        const direction = order === "asc" ? 1 : -1;
+
+        rows.sort((a, b) => {
+            const left = SORT_FIELDS[sortKey](a);
+            const right = SORT_FIELDS[sortKey](b);
+
+            if (typeof left === "string" || typeof right === "string") {
+                return direction * String(left).localeCompare(String(right));
+            }
+
+            if (left === right) {
+                // Stable tiebreaker so ranks do not shuffle between calls.
+                return a.name.localeCompare(b.name);
+            }
+
+            return direction * (left - right);
         });
 
-        res.status(200).json({
-            success: true,
-            platform,
-            metric,
-            leaderboard
-        });
+        /*
+         * Ranks are assigned after sorting. With the default sort the top
+         * row is rank 1 by problems solved across both platforms.
+         */
+        const ranked = rows.map((row, index) => ({ ...row, rank: index + 1 }));
 
+        return OK(res, 200, {
+            students: ranked,
+            count: ranked.length,
+            sections: SECTIONS,
+            sort: sortKey,
+            order: direction === 1 ? "asc" : "desc"
+        });
     } catch (error) {
-        console.error(error);
-
-        res.status(500).json({
-            success: false,
-            message: "Failed to load leaderboard"
-        });
+        console.error("getStudents failed:", error.message);
+        return FAILED(res, 500, "Unable to load students. Please try again.");
     }
 };
 
-const loginAdmin = async (req, res) => {
+const getStudentById = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { id } = req.params;
 
-        if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) {
-            return res.status(500).json({
-                success: false,
-                message: "Admin is not configured"
-            });
+        const isSelf = String(req.studentId) === String(id);
+
+        if (!isSelf && req.role !== "admin") {
+            return FAILED(res, 403, "You can only view your own profile");
         }
 
-        if (
-            email !== process.env.ADMIN_EMAIL ||
-            password !== process.env.ADMIN_PASSWORD
-        ) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid admin credentials"
-            });
+        const student = await Student.findById(id).select(PUBLIC_FIELDS);
+
+        if (!student) {
+            return FAILED(res, 404, "Student not found");
         }
 
-        const token = jwt.sign(
-            {
-                role: "admin"
-            },
-            process.env.JWT_SECRET,
-            {
-                expiresIn: "1d"
-            }
+        return OK(res, 200, { student: toLeaderboardRow(student) });
+    } catch (error) {
+        console.error("getStudentById failed:", error.message);
+        return FAILED(res, 500, "Failed to load student");
+    }
+};
+
+/**
+ * Student self-service profile update.
+ *
+ * Only the two platform handles are accepted. Every other field — name,
+ * email, roll number, section — is rejected explicitly rather than silently
+ * ignored, and this is enforced here rather than in the UI, so a crafted
+ * request cannot change academic details.
+ */
+const updateOwnProfile = async (req, res) => {
+    try {
+        const body = req.body || {};
+
+        const PROTECTED_FIELDS = [
+            "name",
+            "collegeEmail",
+            "email",
+            "rollNo",
+            "section",
+            "password",
+            "role"
+        ];
+
+        const attempted = PROTECTED_FIELDS.filter(
+            (field) => body[field] !== undefined
         );
 
-        res.status(200).json({
-            success: true,
-            message: "Admin login successful",
-            token
-        });
-
-    } catch (error) {
-        console.error(error);
-
-        res.status(500).json({
-            success: false,
-            message: "Admin login failed"
-        });
-    }
-};
-
-const getAllStudents = async (req, res) => {
-    try {
-        const students = await Student.find({})
-            .select(
-                "name collegeEmail rollNo section " +
-                "leetcodeUsername codechefUsername " +
-                "leetcodeStats codechefStats"
-            )
-            .sort({ name: 1 });
-
-        res.status(200).json({
-            success: true,
-            count: students.length,
-            students
-        });
-
-    } catch (error) {
-        console.error(error);
-
-        res.status(500).json({
-            success: false,
-            message: "Failed to fetch students"
-        });
-    }
-};
-
-const updateStudent = async (req, res) => {
-    try {
-        const {
-            name,
-            rollNo,
-            section,
-            leetcodeUsername,
-            codechefUsername
-        } = req.body;
+        if (attempted.length) {
+            return FAILED(
+                res,
+                403,
+                `You are not allowed to change: ${attempted.join(", ")}. Only your LeetCode ID and CodeChef ID can be edited.`
+            );
+        }
 
         const student = await Student.findById(req.studentId);
 
         if (!student) {
-            return res.status(404).json({
-                success: false,
-                message: "Student not found"
-            });
+            return FAILED(res, 404, "Student not found");
         }
 
-        if (name !== undefined) student.name = name;
-        if (rollNo !== undefined) student.rollNo = rollNo;
-        if (section !== undefined) student.section = section;
-        if (leetcodeUsername !== undefined) {
-            student.leetcodeUsername = leetcodeUsername;
-        }
-        if (codechefUsername !== undefined) {
-            student.codechefUsername = codechefUsername;
-        }
+        const updates = {};
 
-        await student.save();
-        queueStudentSync(student);
+        if (body.leetcodeUsername !== undefined) {
+            const result = validateUsername("leetcode", body.leetcodeUsername);
 
-        res.status(200).json({
-            success: true,
-            message: "Profile updated successfully",
-            student: toPublicStudent(student)
-        });
+            if (!result.valid) {
+                return FAILED(res, 400, result.message);
+            }
 
-    } catch (error) {
-        console.error(error);
-
-        res.status(500).json({
-            success: false,
-            message: "Failed to update profile"
-        });
-    }
-};
-
-const updateStudentByAdmin = async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const {
-            name,
-            rollNo,
-            section,
-            collegeEmail,
-            leetcodeUsername,
-            codechefUsername
-        } = req.body;
-
-        const student = await Student.findById(id);
-
-        if (!student) {
-            return res.status(404).json({
-                success: false,
-                message: "Student not found"
-            });
+            updates.leetcodeUsername = result.username;
         }
 
-        if (name !== undefined) student.name = name;
-        if (rollNo !== undefined) student.rollNo = rollNo;
-        if (section !== undefined) student.section = section;
-        if (collegeEmail !== undefined) {
-            student.collegeEmail = collegeEmail.toLowerCase().trim();
+        if (body.codechefUsername !== undefined) {
+            const result = validateUsername("codechef", body.codechefUsername);
+
+            if (!result.valid) {
+                return FAILED(res, 400, result.message);
+            }
+
+            updates.codechefUsername = result.username;
         }
 
-        if (leetcodeUsername !== undefined) {
-            student.leetcodeUsername = leetcodeUsername;
+        if (!Object.keys(updates).length) {
+            return FAILED(
+                res,
+                400,
+                "Provide a LeetCode ID or CodeChef ID to update."
+            );
         }
 
-        if (codechefUsername !== undefined) {
-            student.codechefUsername = codechefUsername;
+        const changedPlatforms = [];
+
+        if (
+            updates.leetcodeUsername !== undefined &&
+            updates.leetcodeUsername !== student.leetcodeUsername
+        ) {
+            student.leetcodeUsername = updates.leetcodeUsername;
+            student.leetcodeStats.syncStatus = "PENDING";
+            student.leetcodeStats.syncError = null;
+            changedPlatforms.push("leetcode");
+        }
+
+        if (
+            updates.codechefUsername !== undefined &&
+            updates.codechefUsername !== student.codechefUsername
+        ) {
+            student.codechefUsername = updates.codechefUsername;
+            student.codechefStats.syncStatus = "PENDING";
+            student.codechefStats.syncError = null;
+            changedPlatforms.push("codechef");
         }
 
         await student.save();
-        queueStudentSync(student);
 
-        res.status(200).json({
-            success: true,
-            message: "Student updated successfully",
-            student: toPublicStudent(student)
-        });
+        /*
+         * New handles are validated by actually fetching them. This happens
+         * after the save so the response is immediate; the sync result is
+         * reflected in the syncStatus field the profile page displays.
+         */
+        const syncResults = [];
 
-    } catch (error) {
-        console.error(error);
-
-        res.status(500).json({
-            success: false,
-            message: "Failed to update student"
-        });
-    }
-};
-
-
-const deleteStudentByAdmin = async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const student = await Student.findByIdAndDelete(id);
-
-        if (!student) {
-            return res.status(404).json({
-                success: false,
-                message: "Student not found"
-            });
+        if (changedPlatforms.length) {
+            for (const platform of changedPlatforms) {
+                try {
+                    const results = await syncStudent(student);
+                    const result = results.find(
+                        (item) => item.platform === platform
+                    );
+                    syncResults.push(result);
+                } catch (error) {
+                    syncResults.push({
+                        platform,
+                        status: "FAILED",
+                        reason: error.message
+                    });
+                }
+            }
         }
 
-        res.status(200).json({
-            success: true,
-            message: "Student deleted successfully"
-        });
+        const failed = syncResults.filter(
+            (result) => result && result.status === "FAILED"
+        );
 
+        const fresh = await Student.findById(student._id).select(PUBLIC_FIELDS);
+
+        return OK(res, 200, {
+            message: failed.length
+                ? PLATFORM_SYNC_ERRORS[failed[0].platform]
+                : "Coding profiles updated successfully.",
+            student: toLeaderboardRow(fresh),
+            syncPartial: failed.length > 0,
+            syncResults
+        });
     } catch (error) {
-        console.error(error);
+        console.error("updateOwnProfile failed:", error.message);
 
-        res.status(500).json({
-            success: false,
-            message: "Failed to delete student"
-        });
-    }
-};
-
-const syncAllStudentsAdmin = async (req, res) => {
-    try {
-        if (syncAllStudents.isSyncing()) {
-            return res.status(202).json({
-                success: true,
-                message: "Synchronization is already running"
-            });
+        if (error.code === 11000) {
+            return FAILED(res, 409, "That value is already in use");
         }
 
-        setImmediate(() => {
-            syncAllStudents().catch((error) => {
-                console.error("Admin synchronization failed:", error.message);
-            });
-        });
-
-        res.status(202).json({
-            success: true,
-            message: "Synchronization started"
-        });
-    } catch (error) {
-        console.error(error);
-
-        res.status(500).json({
-            success: false,
-            message: "Failed to start synchronization"
-        });
+        return FAILED(res, 500, "Failed to update profile");
     }
 };
 
 module.exports = {
-    registerStudent,
-    sendOTP,
-    verifyOTP,
-    loginStudent,
-    getDashboard,
-    getLeaderboard,
-    loginAdmin,
-    getAllStudents,
-    updateStudent,
-    updateStudentByAdmin,
-    deleteStudentByAdmin,
-    syncAllStudentsAdmin
+    getStudents,
+    getStudentById,
+    updateOwnProfile,
+    toLeaderboardRow,
+    escapeRegex
 };
-

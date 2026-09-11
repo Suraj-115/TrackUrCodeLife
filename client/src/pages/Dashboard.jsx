@@ -3,20 +3,17 @@ import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import "./Dashboard.css";
 
-const metricOptions = [
-    { value: "contestRating", label: "Contest Rating" },
-    { value: "problemsSolved", label: "Problems Solved" },
-    { value: "contestsParticipated", label: "Contests" },
-    { value: "lastParticipatedContestDate", label: "Last Contest" }
-];
-
 const sections = ["CSE-11", "CSE-14", "CSE-18", "CSE-22"];
 
 function Dashboard() {
     const navigate = useNavigate();
-    const [platform, setPlatform] = useState("leetcode");
-    const [metric, setMetric] = useState("contestRating");
+    
+    // Filters
+    const [search, setSearch] = useState("");
     const [section, setSection] = useState("");
+    const [sort, setSort] = useState("totalProblems");
+    
+    // Data
     const [students, setStudents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
@@ -24,37 +21,28 @@ function Dashboard() {
 
     const authHeaders = useCallback(() => {
         const token = localStorage.getItem("token");
-
-        if (!token) {
-            return null;
-        }
-
-        return {
-            Authorization: `Bearer ${token}`
-        };
+        if (!token) return null;
+        return { Authorization: `Bearer ${token}` };
     }, []);
 
     const handleAuthError = useCallback((err) => {
         if (err.response?.status === 401 || err.response?.status === 403) {
             localStorage.removeItem("token");
-            navigate("/");
+            navigate("/login");
             return true;
         }
-
         return false;
     }, [navigate]);
 
     const fetchCurrentStudent = useCallback(async () => {
         const headers = authHeaders();
-
         if (!headers) {
-            navigate("/");
+            navigate("/login");
             return;
         }
-
         try {
-            const response = await api.get("/students/dashboard", { headers });
-            setCurrentStudent(response.data.student);
+            const response = await api.get("/students/me", { headers });
+            setCurrentStudent(response.data.user);
         } catch (err) {
             if (!handleAuthError(err)) {
                 setCurrentStudent(null);
@@ -64,9 +52,8 @@ function Dashboard() {
 
     const fetchLeaderboard = useCallback(async () => {
         const headers = authHeaders();
-
         if (!headers) {
-            navigate("/");
+            navigate("/login");
             return;
         }
 
@@ -74,325 +61,222 @@ function Dashboard() {
             setLoading(true);
             setError("");
 
-            const params = {
-                platform,
-                metric
-            };
+            const params = { sort };
+            if (section) params.section = section;
+            if (search) params.search = search;
 
-            if (section) {
-                params.section = section;
-            }
-
-            const response = await api.get("/students/leaderboard", {
-                params,
-                headers
-            });
-
-            setStudents(response.data.leaderboard || []);
+            const response = await api.get("/students", { params, headers });
+            setStudents(response.data.students || []);
         } catch (err) {
-            if (handleAuthError(err)) {
-                return;
-            }
-
+            if (handleAuthError(err)) return;
             setError(err.response?.data?.message || "Unable to load leaderboard.");
         } finally {
             setLoading(false);
         }
-    }, [authHeaders, handleAuthError, metric, navigate, platform, section]);
+    }, [authHeaders, handleAuthError, navigate, search, section, sort]);
 
     useEffect(() => {
         fetchCurrentStudent();
     }, [fetchCurrentStudent]);
 
-    useEffect(() => {
+    // Use debounced search internally if needed, but since data is relatively small, we can trigger fetch directly on a search button click or blur, or just debounce it.
+    // For simplicity, we'll fetch on button click or 'Enter'.
+    const handleSearchSubmit = (e) => {
+        e.preventDefault();
         fetchLeaderboard();
-    }, [fetchLeaderboard]);
-
-    const platformName = platform === "leetcode" ? "LeetCode" : "CodeChef";
-    const metricLabel = metricOptions.find((item) => item.value === metric)?.label || "Contest Rating";
-
-    const getStats = useCallback((student) => student[`${platform}Stats`] || student, [platform]);
-
-    const formatDate = (date) => {
-        if (!date) {
-            return "-";
-        }
-
-        const parsedDate = new Date(date);
-
-        if (Number.isNaN(parsedDate.getTime())) {
-            return "-";
-        }
-
-        return parsedDate.toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric"
-        });
     };
 
-    const getMetricValue = (student) => {
-        const stats = getStats(student);
-
-        if (metric === "lastParticipatedContestDate") {
-            return formatDate(stats.lastParticipatedContestDate);
-        }
-
-        return stats[metric] ?? 0;
-    };
+    useEffect(() => {
+        // Trigger fetch when section or sort changes
+        fetchLeaderboard();
+    }, [section, sort]); // Intentionally not including search so we don't spam API on every keystroke, unless we debounce. We will rely on explicit search or enter key.
 
     const summary = useMemo(() => {
-        const activeStudents = students.filter((student) => {
-            const stats = getStats(student);
-            return stats.problemsSolved > 0 || stats.contestRating > 0 || stats.contestsParticipated > 0;
-        }).length;
-
-        const topStudent = students[0];
-        const synced = students.filter((student) => getStats(student).lastUpdated).length;
-
-        return {
-            activeStudents,
-            topStudent,
-            synced
-        };
-    }, [getStats, students]);
+        const activeStudents = students.filter(s => s.totalProblems > 0 || s.totalRating > 0).length;
+        return { activeStudents };
+    }, [students]);
 
     const logout = () => {
         localStorage.removeItem("token");
-        navigate("/");
+        navigate("/login");
+    };
+
+    // HORROR THEME STYLES
+    const horrorTheme = {
+        bg: "url('/nun.jpg') center/cover no-repeat fixed",
+        overlay: "rgba(5, 5, 5, 0.85)", // Darker translucent layer
+        surface: "rgba(15, 5, 5, 0.75)", // Deep blood-tinted black
+        surfaceSoft: "rgba(30, 10, 10, 0.8)",
+        border: "#5c0a0a", // Deep blood red
+        text: "#e5e5e5", // Pale bone white
+        textMuted: "#a39999",
+        accent: "#cc0000", // Crimson red
+        accentHover: "#ff1a1a"
     };
 
     return (
-        <div className="dashboard-page">
-            <header className="dashboard-header">
-                <button className="brand-section" onClick={() => navigate("/dashboard")}>
-                    <span className="brand-logo">T</span>
-                    <span>
-                        <strong>TrackUrCodeLife</strong>
-                        <small>Competitive programming tracker</small>
-                    </span>
-                </button>
-
-                <div className="header-actions">
-                    {currentStudent && (
-                        <div className="student-mini-profile">
-                            <span className="mini-avatar">
-                                {currentStudent.name?.charAt(0)?.toUpperCase() || "S"}
-                            </span>
-                            <span className="mini-profile-info">
-                                <strong>{currentStudent.name}</strong>
-                                <small>{currentStudent.section}</small>
-                            </span>
-                        </div>
-                    )}
-
-                    <button className="ghost-button" onClick={() => navigate("/edit-profile")}>
-                        Profile
-                    </button>
-                    <button className="dark-button" onClick={logout}>
-                        Logout
-                    </button>
-                </div>
-            </header>
-
-            <main className="dashboard-main">
-                <section className="dashboard-hero">
-                    <div>
-                        <span className="eyebrow">STUDENT PERFORMANCE</span>
-                        <h1>Coding Leaderboard</h1>
-                        <p>
-                            Track class progress across LeetCode and CodeChef with clean rankings,
-                            current platform stats, and section filters.
-                        </p>
-                    </div>
-
-                    {currentStudent && (
-                        <aside className="hero-student-card">
-                            <span>Logged in as</span>
-                            <strong>{currentStudent.name}</strong>
-                            <small>{currentStudent.rollNo}</small>
-                        </aside>
-                    )}
-                </section>
-
-                <section className="summary-grid" aria-label="Leaderboard summary">
-                    <article>
-                        <span>Total Students</span>
-                        <strong>{students.length}</strong>
-                        <small>{section || "All sections"}</small>
-                    </article>
-                    <article>
-                        <span>Active Profiles</span>
-                        <strong>{summary.activeStudents}</strong>
-                        <small>{platformName} activity found</small>
-                    </article>
-                    <article>
-                        <span>Top Rank</span>
-                        <strong>{summary.topStudent?.name || "-"}</strong>
-                        <small>{summary.topStudent ? `${metricLabel}: ${getMetricValue(summary.topStudent)}` : "No data yet"}</small>
-                    </article>
-                    <article>
-                        <span>Synced Profiles</span>
-                        <strong>{summary.synced}</strong>
-                        <small>Last update recorded</small>
-                    </article>
-                </section>
-
-                <section className="control-panel">
-                    <div className="platform-switch" aria-label="Platform switch">
-                        <button
-                            className={platform === "leetcode" ? "platform-card active" : "platform-card"}
-                            onClick={() => setPlatform("leetcode")}
-                            type="button"
-                        >
-                            <span className="platform-icon">LC</span>
-                            <span>
-                                <strong>LeetCode</strong>
-                                <small>Problem solving and contests</small>
-                            </span>
-                        </button>
-
-                        <button
-                            className={platform === "codechef" ? "platform-card active" : "platform-card"}
-                            onClick={() => setPlatform("codechef")}
-                            type="button"
-                        >
-                            <span className="platform-icon">CC</span>
-                            <span>
-                                <strong>CodeChef</strong>
-                                <small>Ratings and contest history</small>
-                            </span>
-                        </button>
-                    </div>
-
-                    <div className="filters-section">
-                        <label className="filter-group">
-                            <span>Rank By</span>
-                            <select value={metric} onChange={(e) => setMetric(e.target.value)}>
-                                {metricOptions.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-
-                        <label className="filter-group">
-                            <span>Section</span>
-                            <select value={section} onChange={(e) => setSection(e.target.value)}>
-                                <option value="">All Sections</option>
-                                {sections.map((item) => (
-                                    <option key={item} value={item}>
-                                        {item}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                    </div>
-                </section>
-
-                <section className="leaderboard-section">
-                    <div className="leaderboard-header">
+        <div style={{ minHeight: '100vh', background: horrorTheme.bg, color: horrorTheme.text, display: 'flex', flexDirection: 'column', fontFamily: "'Cinzel', 'Times New Roman', serif" }}>
+            <div style={{ flex: 1, backgroundColor: horrorTheme.overlay, display: 'flex', flexDirection: 'column' }}>
+                <header style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0.9) 0%, rgba(20,0,0,0.4) 100%)', padding: '1.5rem 3rem', borderBottom: `2px solid ${horrorTheme.accent}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 30px rgba(200, 0, 0, 0.2)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', cursor: 'pointer' }} onClick={() => navigate("/dashboard")}>
+                        <span style={{ display: 'inline-flex', width: '50px', height: '50px', background: horrorTheme.accent, color: 'black', borderRadius: '50%', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1.8rem', textShadow: '0 0 10px rgba(255,255,255,0.5)', boxShadow: `0 0 15px ${horrorTheme.accent}` }}>✞</span>
                         <div>
-                            <span className="eyebrow">{platformName.toUpperCase()}</span>
-                            <h2>{metricLabel} Rankings</h2>
+                            <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 700, letterSpacing: '3px', textTransform: 'uppercase', textShadow: `2px 2px 5px ${horrorTheme.accent}` }}>TrackUrCodeLife</h2>
+                            <span style={{ fontSize: '1rem', color: horrorTheme.accent, fontStyle: 'italic', letterSpacing: '1px' }}>The Initiate's Path</span>
                         </div>
-                        <button className="ghost-button" onClick={fetchLeaderboard} type="button">
-                            Refresh
-                        </button>
                     </div>
 
-                    {loading && (
-                        <div className="state-card">
-                            <span className="loader" aria-hidden="true"></span>
-                            <p>Loading leaderboard...</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                        {currentStudent && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginRight: '1rem' }}>
+                                <span style={{ background: horrorTheme.accent, color: 'black', width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', boxShadow: `0 0 10px ${horrorTheme.accent}` }}>
+                                    {currentStudent.name?.charAt(0)?.toUpperCase() || "S"}
+                                </span>
+                                <span style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <strong style={{ fontSize: '1rem', color: 'white', letterSpacing: '1px' }}>{currentStudent.name}</strong>
+                                </span>
+                            </div>
+                        )}
+                        <button 
+                            onClick={() => navigate("/profile")}
+                            style={{ padding: '0.8rem 1.5rem', background: 'transparent', border: `1px solid ${horrorTheme.accent}`, color: horrorTheme.accent, cursor: 'pointer', fontSize: '1rem', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px', transition: '0.3s', textShadow: `0 0 5px ${horrorTheme.accent}` }}
+                            onMouseOver={(e) => { e.currentTarget.style.background = horrorTheme.accent; e.currentTarget.style.color = 'black'; }}
+                            onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = horrorTheme.accent; }}
+                        >
+                            Reflect
+                        </button>
+                        <button 
+                            onClick={logout}
+                            style={{ padding: '0.8rem 1.5rem', background: horrorTheme.surface, border: `1px solid ${horrorTheme.border}`, color: horrorTheme.textMuted, cursor: 'pointer', fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '1px', transition: '0.3s' }}
+                            onMouseOver={(e) => { e.currentTarget.style.color = 'white'; e.currentTarget.style.borderColor = 'white'; }}
+                            onMouseOut={(e) => { e.currentTarget.style.color = horrorTheme.textMuted; e.currentTarget.style.borderColor = horrorTheme.border; }}
+                        >
+                            Flee
+                        </button>
+                    </div>
+                </header>
+
+                <main style={{ maxWidth: '1400px', width: '100%', margin: '0 auto', padding: '3rem', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                    <section style={{ textAlign: 'center', marginBottom: '3rem' }}>
+                        <span style={{ fontSize: '1.2rem', color: horrorTheme.accent, letterSpacing: '4px', textTransform: 'uppercase' }}>The Final Judgement</span>
+                        <h1 style={{ fontSize: '3.5rem', fontWeight: 800, margin: '0.5rem 0', textShadow: `0 0 20px ${horrorTheme.accent}`, letterSpacing: '2px' }}>Coding Leaderboard</h1>
+                        <p style={{ color: horrorTheme.textMuted, fontSize: '1.2rem', fontStyle: 'italic' }}>
+                            Witness the ranking of souls across the abyss.
+                        </p>
+                    </section>
+
+                    <section style={{ display: 'flex', gap: '2rem', marginBottom: '2rem', flexWrap: 'wrap', alignItems: 'flex-end', background: horrorTheme.surface, padding: '2rem', borderRadius: '12px', border: `1px solid ${horrorTheme.border}`, boxShadow: 'inset 0 0 50px rgba(0,0,0,0.8)' }}>
+                        <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '1rem', flex: 1, minWidth: '250px', alignItems: 'flex-end' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1 }}>
+                                <span style={{ color: horrorTheme.textMuted, textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '1px' }}>Seek a Soul</span>
+                                <input
+                                    type="text"
+                                    placeholder="Enter a name..."
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                    style={{ padding: '1rem', background: 'rgba(0,0,0,0.5)', border: `1px solid ${horrorTheme.border}`, color: 'white', fontSize: '1.1rem', outline: 'none' }}
+                                />
+                            </div>
+                            <button type="submit" style={{ padding: '1rem 2rem', background: horrorTheme.accent, border: `1px solid ${horrorTheme.accent}`, color: 'black', cursor: 'pointer', fontSize: '1rem', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px', transition: '0.3s' }}>Seek</button>
+                        </form>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', minWidth: '200px' }}>
+                            <span style={{ color: horrorTheme.textMuted, textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '1px' }}>Chamber</span>
+                            <select value={section} onChange={(e) => setSection(e.target.value)} style={{ padding: '1rem', background: 'rgba(0,0,0,0.8)', border: `1px solid ${horrorTheme.border}`, color: 'white', fontSize: '1.1rem', outline: 'none', cursor: 'pointer' }}>
+                                <option value="">All Chambers</option>
+                                {sections.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
                         </div>
-                    )}
 
-                    {!loading && error && (
-                        <div className="state-card error-state">
-                            <h3>Unable to load data</h3>
-                            <p>{error}</p>
-                            <button className="dark-button" onClick={fetchLeaderboard} type="button">
-                                Try Again
-                            </button>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', minWidth: '200px' }}>
+                            <span style={{ color: horrorTheme.textMuted, textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: '1px' }}>Measure By</span>
+                            <select value={sort} onChange={(e) => setSort(e.target.value)} style={{ padding: '1rem', background: 'rgba(0,0,0,0.8)', border: `1px solid ${horrorTheme.border}`, color: 'white', fontSize: '1.1rem', outline: 'none', cursor: 'pointer' }}>
+                                <option value="totalProblems">Total Torment (Problems)</option>
+                                <option value="totalRating">Total Power (Rating)</option>
+                                <option value="leetcodeProblems">LeetCode Torment</option>
+                                <option value="codechefProblems">CodeChef Torment</option>
+                            </select>
                         </div>
-                    )}
+                    </section>
 
-                    {!loading && !error && students.length === 0 && (
-                        <div className="state-card">
-                            <h3>No students found</h3>
-                            <p>Try changing the section, platform, or metric.</p>
-                        </div>
-                    )}
+                    <section style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                        {loading && (
+                            <div style={{ textAlign: 'center', padding: '5rem', color: horrorTheme.accent, fontSize: '2rem', fontStyle: 'italic', letterSpacing: '3px', animation: 'pulse 2s infinite' }}>
+                                Summoning the ranks...
+                            </div>
+                        )}
 
-                    {!loading && !error && students.length > 0 && (
-                        <div className="table-wrapper">
-                            <table className="leaderboard-table">
-                                <thead>
-                                    <tr>
-                                        <th>Rank</th>
-                                        <th>Student</th>
-                                        <th>Section</th>
-                                        <th>{metricLabel}</th>
-                                        <th>Problems</th>
-                                        <th>Contests</th>
-                                        <th>Last Updated</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {students.map((student, index) => {
-                                        const stats = getStats(student);
+                        {!loading && error && (
+                            <div style={{ textAlign: 'center', padding: '3rem', border: `2px solid ${horrorTheme.accent}`, background: horrorTheme.surfaceSoft, color: horrorTheme.accent }}>
+                                <h3 style={{ fontSize: '1.8rem', marginBottom: '1rem', textTransform: 'uppercase' }}>The Ritual Failed</h3>
+                                <p style={{ fontSize: '1.2rem', marginBottom: '2rem' }}>{error}</p>
+                                <button onClick={fetchLeaderboard} style={{ padding: '1rem 2rem', background: 'transparent', border: `1px solid ${horrorTheme.accent}`, color: horrorTheme.accent, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px', transition: '0.3s' }}>Attempt Again</button>
+                            </div>
+                        )}
 
-                                        return (
-                                            <tr key={student._id || `${student.rollNo}-${index}`}>
-                                                <td>
-                                                    <span className={`rank rank-${index + 1}`}>
-                                                        {student.rank || index + 1}
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <div className="student-cell">
-                                                        <span className="student-avatar">
-                                                            {student.name?.charAt(0)?.toUpperCase() || "S"}
+                        {!loading && !error && students.length === 0 && (
+                            <div style={{ textAlign: 'center', padding: '5rem', color: horrorTheme.textMuted, fontSize: '1.5rem', fontStyle: 'italic', background: horrorTheme.surface, border: `1px solid ${horrorTheme.border}` }}>
+                                No souls match your query. They have evaded judgement.
+                            </div>
+                        )}
+
+                        {!loading && !error && students.length > 0 && (
+                            <div style={{ background: horrorTheme.surface, border: `1px solid ${horrorTheme.border}`, overflowY: 'auto', flex: 1, boxShadow: `0 0 30px rgba(100, 0, 0, 0.1)` }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '1.1rem' }}>
+                                    <thead style={{ position: 'sticky', top: 0, background: 'rgba(10, 0, 0, 0.95)', zIndex: 10, borderBottom: `2px solid ${horrorTheme.accent}` }}>
+                                        <tr>
+                                            <th style={{ padding: '1.5rem', color: horrorTheme.accent, textTransform: 'uppercase', letterSpacing: '1px' }}>Rank</th>
+                                            <th style={{ padding: '1.5rem', color: horrorTheme.accent, textTransform: 'uppercase', letterSpacing: '1px' }}>Soul Name</th>
+                                            <th style={{ padding: '1.5rem', color: horrorTheme.accent, textTransform: 'uppercase', letterSpacing: '1px' }}>Chamber</th>
+                                            <th style={{ padding: '1.5rem', color: horrorTheme.accent, textTransform: 'uppercase', letterSpacing: '1px', textAlign: 'center' }}>LeetCode (Torment / Power)</th>
+                                            <th style={{ padding: '1.5rem', color: horrorTheme.accent, textTransform: 'uppercase', letterSpacing: '1px', textAlign: 'center' }}>CodeChef (Torment / Power)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {students.map((student, index) => (
+                                            <tr key={student._id} style={{ borderBottom: `1px solid ${horrorTheme.border}`, background: index % 2 === 0 ? 'rgba(0,0,0,0.3)' : 'transparent', transition: 'background 0.3s' }} onMouseOver={(e) => e.currentTarget.style.background = 'rgba(50, 0, 0, 0.5)'} onMouseOut={(e) => e.currentTarget.style.background = index % 2 === 0 ? 'rgba(0,0,0,0.3)' : 'transparent'}>
+                                                <td style={{ padding: '1.5rem', fontWeight: 'bold', color: horrorTheme.accent, fontSize: '1.5rem', textShadow: `0 0 5px ${horrorTheme.accent}` }}>#{student.rank}</td>
+                                                <td style={{ padding: '1.5rem' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                                        <span style={{ background: 'rgba(0,0,0,0.8)', border: `1px solid ${horrorTheme.accent}`, color: horrorTheme.accent, width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1.2rem', boxShadow: `0 0 10px ${horrorTheme.accent}` }}>
+                                                            {student.name.charAt(0).toUpperCase()}
                                                         </span>
-                                                        <span>
-                                                            <strong>{student.name}</strong>
-                                                            <small>{student.rollNo}</small>
-                                                        </span>
+                                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                                            <strong style={{ color: 'white', fontSize: '1.2rem', letterSpacing: '1px' }}>{student.name}</strong>
+                                                        </div>
                                                     </div>
                                                 </td>
-                                                <td>
-                                                    <span className="section-badge">{student.section}</span>
-                                                </td>
-                                                <td>
-                                                    <strong className="metric-value">{getMetricValue(student)}</strong>
-                                                </td>
-                                                <td>{stats.problemsSolved ?? 0}</td>
-                                                <td>{stats.contestsParticipated ?? 0}</td>
-                                                <td>
-                                                    <span className="updated-date">
-                                                        {formatDate(stats.lastUpdated)}
+                                                <td style={{ padding: '1.5rem' }}>
+                                                    <span style={{ padding: '0.4rem 0.8rem', border: `1px solid ${horrorTheme.border}`, color: horrorTheme.accent, background: 'rgba(0,0,0,0.5)', letterSpacing: '1px' }}>
+                                                        {student.section}
                                                     </span>
                                                 </td>
+                                                <td style={{ padding: '1.5rem', textAlign: 'center' }}>
+                                                    {student.leetcodeUsername ? (
+                                                        <div style={{ fontSize: '1.2rem' }}>
+                                                            <strong style={{ color: 'white' }}>{student.leetcode.problemsSolved}</strong> <span style={{ color: horrorTheme.border }}>/</span> <span style={{ color: horrorTheme.textMuted }}>{student.leetcode.contestRating}</span>
+                                                        </div>
+                                                    ) : <span style={{ color: horrorTheme.border, fontStyle: 'italic' }}>Lost Soul</span>}
+                                                </td>
+                                                <td style={{ padding: '1.5rem', textAlign: 'center' }}>
+                                                    {student.codechefUsername ? (
+                                                        <div style={{ fontSize: '1.2rem' }}>
+                                                            <strong style={{ color: 'white' }}>{student.codechef.problemsSolved}</strong> <span style={{ color: horrorTheme.border }}>/</span> <span style={{ color: horrorTheme.textMuted }}>{student.codechef.contestRating}</span>
+                                                        </div>
+                                                    ) : <span style={{ color: horrorTheme.border, fontStyle: 'italic' }}>Lost Soul</span>}
+                                                </td>
                                             </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </section>
-
-                <footer className="dashboard-footer">
-                    <span>TrackUrCodeLife</span>
-                    <button className="link-button" onClick={() => navigate("/developer")} type="button">
-                        Developer
-                    </button>
-                </footer>
-            </main>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </section>
+                </main>
+            </div>
         </div>
     );
 }
 
 export default Dashboard;
+
